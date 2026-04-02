@@ -1185,7 +1185,7 @@
             el.setAttribute('data-upload', el.getAttribute('data-upload-locked'));
             el.removeAttribute('data-upload-locked');
           });
-          alert('Upload unlocked!');
+          enterEditMode();
         } else {
           alert('Incorrect password.');
         }
@@ -1332,13 +1332,7 @@
       closeEditPanel();
     }
 
-    // Activate edit mode after password unlock
-    var _origUnlock = uploadUnlocked;
-    var _origCheckPass = checkUploadPassword;
-    async function checkUploadPassword() {
-      await _origCheckPass();
-      if (uploadUnlocked) enterEditMode();
-    }
+
   </script>
 
   <!-- Edit mode banner -->
@@ -1373,6 +1367,10 @@
         <button class="edit-save-btn" onclick="saveEdit()">Save</button>
         <button class="edit-cancel-btn" onclick="closeEditPanel()">Cancel</button>
       </div>
+    </div>
+  </div>
+</body>
+</html>
     </div>
   </div>
 </body>
