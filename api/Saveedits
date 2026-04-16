@@ -1,0 +1,65 @@
+const https = require('https');
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
+  }
+
+  const token = process.env.GITHUB_TOKEN;
+  const repo  = process.env.GITHUB_REPO; // e.g. "kendrivendio/kendrivendio.github.io"
+
+  if (!token || !repo) {
+    return res.status(500).json({ ok: false, error: 'Missing env vars' });
+  }
+
+  const edits   = req.body;
+  const path    = 'edits.json';
+  const content = Buffer.from(JSON.stringify(edits, null, 2)).toString('base64');
+  const apiPath = `/repos/${repo}/contents/${path}`;
+
+  async function githubRequest(method, apiPath, body) {
+    return new Promise((resolve, reject) => {
+      const data = body ? JSON.stringify(body) : null;
+      const reqOptions = {
+        hostname: 'api.github.com',
+        path: apiPath,
+        method,
+        headers: {
+          'Authorization': `token ${token}`,
+          'User-Agent':    'kendri-portfolio',
+          'Content-Type':  'application/json',
+          ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}),
+        },
+      };
+      const r = https.request(reqOptions, response => {
+        let raw = '';
+        response.on('data', chunk => raw += chunk);
+        response.on('end', () => {
+          try { resolve({ status: response.statusCode, body: JSON.parse(raw) }); }
+          catch { resolve({ status: response.statusCode, body: raw }); }
+        });
+      });
+      r.on('error', reject);
+      if (data) r.write(data);
+      r.end();
+    });
+  }
+
+  // Get current SHA if file exists
+  let sha;
+  const getRes = await githubRequest('GET', apiPath);
+  if (getRes.status === 200) sha = getRes.body.sha;
+
+  // Write new content
+  const putRes = await githubRequest('PUT', apiPath, {
+    message: 'Update edits.json via portfolio editor',
+    content,
+    ...(sha ? { sha } : {}),
+  });
+
+  if (putRes.status === 200 || putRes.status === 201) {
+    return res.status(200).json({ ok: true });
+  } else {
+    return res.status(500).json({ ok: false, error: putRes.body.message || 'GitHub API error' });
+  }
+}
