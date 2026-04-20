@@ -273,21 +273,13 @@
       background: var(--surface);
       cursor: none;
     }
-    body:not(.edit-mode) .gallery-item:has(.gallery-placeholder) { display: none; }
     .gallery-item:nth-child(1) { grid-column: span 2; aspect-ratio: 16/9; }
-    body:not(.edit-mode) .gallery-item:has(.gallery-placeholder) { display: none; }
     .gallery-item:nth-child(2) { aspect-ratio: 3/4; }
-    body:not(.edit-mode) .gallery-item:has(.gallery-placeholder) { display: none; }
     .gallery-item:nth-child(3) { aspect-ratio: 1; }
-    body:not(.edit-mode) .gallery-item:has(.gallery-placeholder) { display: none; }
     .gallery-item:nth-child(4) { aspect-ratio: 1; }
-    body:not(.edit-mode) .gallery-item:has(.gallery-placeholder) { display: none; }
     .gallery-item:nth-child(5) { grid-column: span 2; aspect-ratio: 16/9; }
-    body:not(.edit-mode) .gallery-item:has(.gallery-placeholder) { display: none; }
     .gallery-item:nth-child(6) { aspect-ratio: 4/5; }
-    body:not(.edit-mode) .gallery-item:has(.gallery-placeholder) { display: none; }
     .gallery-item:nth-child(7) { aspect-ratio: 4/5; }
-    body:not(.edit-mode) .gallery-item:has(.gallery-placeholder) { display: none; }
     .gallery-item:nth-child(8) { aspect-ratio: 4/5; }
 
     .gallery-placeholder {
@@ -304,9 +296,7 @@
       transition: border-color 0.2s, background 0.2s;
       cursor: pointer;
     }
-    body.edit-mode .gallery-placeholder {
-      display: flex;
-    }
+
     .gallery-placeholder .icon {
       font-size: 28px;
       opacity: 0.3;
@@ -391,9 +381,7 @@
       transition: border-color 0.2s, background 0.2s;
       cursor: pointer;
     }
-    body.edit-mode .gallery-placeholder {
-      display: flex;
-    }
+
     .gallery-placeholder:hover {
       border-color: var(--accent-dim);
       background: rgba(201,169,110,0.03);
@@ -945,6 +933,52 @@
     }
     .footer-edit a:hover { color: var(--border); }
     footer { position: relative; }
+
+    /* Add button */
+    .gallery-add-btn {
+      display: none;
+      position: fixed;
+      bottom: 40px;
+      right: 40px;
+      width: 56px; height: 56px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      font-size: 28px;
+      line-height: 1;
+      cursor: pointer;
+      z-index: 200;
+      box-shadow: 0 4px 24px rgba(192,57,43,0.4);
+      transition: transform 0.2s, box-shadow 0.2s;
+      align-items: center;
+      justify-content: center;
+    }
+    body.edit-mode .gallery-add-btn { display: flex; }
+    .gallery-add-btn:hover {
+      transform: scale(1.1);
+      box-shadow: 0 6px 32px rgba(192,57,43,0.6);
+    }
+
+    /* Upload tile (dynamically added) */
+    .gallery-placeholder {
+      width: 100%; height: 100%; min-height: 180px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .gallery-placeholder:hover {
+      border-color: var(--accent-dim);
+      background: rgba(192,57,43,0.03);
+    }
+    .gallery-placeholder .icon { font-size: 22px; opacity: 0.3; }
+    .gallery-placeholder .label { font-size: 9px; letter-spacing: 0.25em; text-transform: uppercase; opacity: 0.35; }
   </style>
 </head>
 <body>
@@ -1053,29 +1087,9 @@
           <button class="gallery-expand" data-expand="4">⤢</button>
         </div>
       </div>
-      <div class="gallery-item wide" data-id="5">
-        <div class="gallery-placeholder" data-upload-locked="5">
-          <div class="icon">+</div>
-          <div class="label">Upload artwork</div>
-        </div>
       </div>
-      <div class="gallery-item" data-id="6">
-        <div class="gallery-placeholder" data-upload-locked="6">
-          <div class="icon">+</div>
-          <div class="label">Upload artwork</div>
-        </div>
       </div>
-      <div class="gallery-item" data-id="7">
-        <div class="gallery-placeholder" data-upload-locked="7">
-          <div class="icon">+</div>
-          <div class="label">Upload artwork</div>
-        </div>
       </div>
-      <div class="gallery-item" data-id="8">
-        <div class="gallery-placeholder" data-upload-locked="8">
-          <div class="icon">+</div>
-          <div class="label">Upload artwork</div>
-        </div>
       </div>
     </div>
 
@@ -1249,13 +1263,35 @@
         if (img) openLightbox(img.src);
         return;
       }
-      if (ev.target.closest('[data-upload-locked]')) {
-        checkUploadPassword();
-        return;
+      const uploadEl = ev.target.closest('.gallery-placeholder');
+      if (uploadEl) {
+        const item = uploadEl.closest('.gallery-item');
+        triggerUpload(parseInt(item.dataset.id));
       }
-      const uploadEl = ev.target.closest('[data-upload]');
-      if (uploadEl) triggerUpload(parseInt(uploadEl.dataset.upload));
     });
+
+    // Next available tile id
+    function nextTileId() {
+      const ids = Array.from(document.querySelectorAll('.gallery-item[data-id]'))
+        .map(el => parseInt(el.dataset.id));
+      return ids.length ? Math.max(...ids) + 1 : 0;
+    }
+
+    function addNewTile() {
+      const id   = nextTileId();
+      const item = document.createElement('div');
+      item.className   = 'gallery-item';
+      item.dataset.id  = id;
+      item.innerHTML =
+        '<div class="gallery-placeholder">' +
+          '<div class="icon">+</div>' +
+          '<div class="label">Upload artwork</div>' +
+        '</div>';
+      document.getElementById('gallery-grid').appendChild(item);
+      bindCursor();
+      // Auto-trigger upload immediately
+      triggerUpload(id);
+    }
 
     function triggerUpload(id) {
       const input = document.createElement('input');
@@ -1264,6 +1300,7 @@
         const reader = new FileReader();
         reader.onload = function(e2) {
           const item = document.querySelector('.gallery-item[data-id="' + id + '"]');
+          if (!item) return;
           item.innerHTML =
             '<button class="tile-edit-btn" onclick="openEditPanel(' + id + ')">✎ Edit</button>' +
             '<img src="' + e2.target.result + '" alt="Artwork" />' +
@@ -1390,6 +1427,9 @@
       document.getElementById('form-success').classList.add('visible');
     }
   </script>
+
+  <!-- Add tile button -->
+  <button class="gallery-add-btn" id="gallery-add-btn" onclick="addNewTile()" title="Add artwork">+</button>
 
   <!-- Edit mode banner -->
   <div class="edit-mode-banner" id="edit-banner">
