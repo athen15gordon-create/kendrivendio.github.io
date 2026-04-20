@@ -979,6 +979,30 @@
     }
     .gallery-placeholder .icon { font-size: 22px; opacity: 0.3; }
     .gallery-placeholder .label { font-size: 9px; letter-spacing: 0.25em; text-transform: uppercase; opacity: 0.35; }
+
+    /* Delete button (edit mode only) */
+    .tile-delete-btn {
+      display: none;
+      position: absolute;
+      top: 12px; right: 12px;
+      background: rgba(13,12,11,0.8);
+      color: var(--accent);
+      border: 1px solid var(--accent-dim);
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      width: 28px; height: 28px;
+      align-items: center; justify-content: center;
+      cursor: pointer;
+      z-index: 10;
+      transition: background 0.2s;
+    }
+    body.edit-mode .tile-delete-btn { display: flex; }
+    .tile-delete-btn:hover { background: var(--accent); color: var(--bg); }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
@@ -1213,14 +1237,28 @@
     }, { threshold: 0.1 });
     document.querySelectorAll('.reveal').forEach(r => revealObserver.observe(r));
 
-    // ── Load saved edits on page load ──
+    // ── Load saved edits + Cloudinary images on page load ──
     async function loadEdits() {
       try {
         const res = await fetch('/edits.json?cb=' + Date.now());
         if (!res.ok) return;
         const edits = await res.json();
+        Object.assign(pendingEdits, edits);
         Object.entries(edits).forEach(([id, data]) => {
-          applyEdit(id, data.caption, data.platform, data.link, false);
+          if (data.src) {
+            // Cloudinary-uploaded image — create tile dynamically
+            const grid = document.getElementById('gallery-grid');
+            // Only add if tile doesn't already exist (baked-in tiles have ids 0-4)
+            if (!document.querySelector('.gallery-item[data-id="' + id + '"]')) {
+              const item = document.createElement('div');
+              item.className  = 'gallery-item';
+              item.dataset.id = id;
+              grid.appendChild(item);
+            }
+            buildImageTile(id, data.src, data.caption||'', data.platform||'◈ Instagram', data.link||'');
+          } else {
+            applyEdit(id, data.caption, data.platform, data.link, false);
+          }
         });
       } catch(e) {}
     }
@@ -1289,33 +1327,87 @@
         '</div>';
       document.getElementById('gallery-grid').appendChild(item);
       bindCursor();
-      // Auto-trigger upload immediately
       triggerUpload(id);
     }
 
-    function triggerUpload(id) {
+    function setTileLoading(id, loading) {
+      const item = document.querySelector('.gallery-item[data-id="' + id + '"]');
+      if (!item) return;
+      if (loading) {
+        item.innerHTML = '<div class="gallery-placeholder"><div class="icon" style="animation:spin 1s linear infinite">◈</div><div class="label">Uploading...</div></div>';
+      }
+    }
+
+    async function triggerUpload(id) {
       const input = document.createElement('input');
       input.type = 'file'; input.accept = 'image/*';
-      input.onchange = function(ev) {
-        const reader = new FileReader();
-        reader.onload = function(e2) {
+      input.onchange = async function(ev) {
+        const file = ev.target.files[0];
+        if (!file) return;
+        setTileLoading(id, true);
+
+        // Upload to Cloudinary unsigned
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', 'ml_default');
+        formData.append('public_id', 'kendri_tile_' + id);
+
+        let imageUrl;
+        try {
+          const res  = await fetch('https://api.cloudinary.com/v1_1/den520ayd/image/upload', {
+            method: 'POST',
+            body: formData,
+          });
+          const data = await res.json();
+          if (!data.secure_url) throw new Error(data.error?.message || 'Upload failed');
+          imageUrl = data.secure_url;
+        } catch(e) {
+          alert('Image upload failed: ' + e.message);
+          // Remove the empty tile on failure
           const item = document.querySelector('.gallery-item[data-id="' + id + '"]');
-          if (!item) return;
-          item.innerHTML =
-            '<button class="tile-edit-btn" onclick="openEditPanel(' + id + ')">✎ Edit</button>' +
-            '<img src="' + e2.target.result + '" alt="Artwork" />' +
-            '<div class="gallery-overlay">' +
-              '<div class="gallery-meta">' +
-                '<a class="gallery-platform" data-field="platform" href="https://www.instagram.com/kendrivendio" target="_blank">◈ Instagram</a>' +
-                '<span class="gallery-caption" data-field="caption"></span>' +
-              '</div>' +
-              '<button class="gallery-expand" data-expand="' + id + '">⤢</button>' +
-            '</div>';
-          bindCursor();
+          if (item) item.remove();
+          return;
+        }
+
+        // Build tile with Cloudinary URL
+        buildImageTile(id, imageUrl, '', '◈ Instagram', 'https://www.instagram.com/kendrivendio');
+
+        // Save to metadata
+        pendingEdits[id] = {
+          src:      imageUrl,
+          caption:  '',
+          platform: '◈ Instagram',
+          link:     'https://www.instagram.com/kendrivendio',
         };
-        reader.readAsDataURL(ev.target.files[0]);
+        await persistEdits();
       };
       input.click();
+    }
+
+    function buildImageTile(id, src, caption, platform, link) {
+      const item = document.querySelector('.gallery-item[data-id="' + id + '"]');
+      if (!item) return;
+      item.dataset.link = link || '';
+      item.innerHTML =
+        '<button class="tile-edit-btn" onclick="openEditPanel(' + id + ')">✎ Edit</button>' +
+        '<button class="tile-delete-btn" onclick="deleteTile(' + id + ')">✕</button>' +
+        '<img src="' + src + '" alt="' + (caption||'Artwork') + '" />' +
+        '<div class="gallery-overlay">' +
+          '<div class="gallery-meta">' +
+            '<a class="gallery-platform" data-field="platform" href="' + (link||'#') + '" target="_blank">' + platform + '</a>' +
+            '<span class="gallery-caption" data-field="caption">' + caption + '</span>' +
+          '</div>' +
+          '<button class="gallery-expand" data-expand="' + id + '">⤢</button>' +
+        '</div>';
+      bindCursor();
+    }
+
+    async function deleteTile(id) {
+      if (!confirm('Remove this artwork?')) return;
+      const item = document.querySelector('.gallery-item[data-id="' + id + '"]');
+      if (item) item.remove();
+      delete pendingEdits[id];
+      await persistEdits();
     }
 
     // ── Lightbox ──
@@ -1375,23 +1467,18 @@
       closeEditPanel();
     }
 
-    // ── Persist edits via Vercel function → GitHub API ──
+    // ── Metadata store ──
     var pendingEdits = {};
 
-    // Pre-load any existing edits into pendingEdits so we don't overwrite them
     async function loadEditsIntoMemory() {
       try {
         const res = await fetch('/edits.json?cb=' + Date.now());
-        if (res.ok) {
-          const data = await res.json();
-          Object.assign(pendingEdits, data);
-        }
+        if (res.ok) Object.assign(pendingEdits, await res.json());
       } catch(e) {}
     }
     loadEditsIntoMemory();
 
-    async function saveEdits(id, caption, platform, link) {
-      pendingEdits[id] = { caption, platform, link };
+    async function persistEdits() {
       try {
         const res = await fetch('/api/saveedits', {
           method: 'POST',
@@ -1400,15 +1487,20 @@
         });
         const text = await res.text();
         let data;
-        try { data = JSON.parse(text); } catch(e) { alert('Bad response: ' + text.slice(0,200)); return; }
-        if (!data.ok) alert('Save failed: ' + data.error);
-        else {
-          const banner = document.getElementById('edit-banner');
-          const msg = banner.querySelector('.save-msg');
-          msg.textContent = '✓ Saved';
-          setTimeout(() => msg.textContent = '', 2000);
+        try { data = JSON.parse(text); } catch(e) { alert('Bad server response: ' + text.slice(0,300)); return; }
+        if (!data.ok) {
+          alert('Save failed: ' + data.error);
+        } else {
+          const msg = document.querySelector('.save-msg');
+          if (msg) { msg.textContent = '✓ Saved'; setTimeout(() => msg.textContent = '', 2000); }
         }
       } catch(e) { alert('Save error: ' + e.message); }
+    }
+
+    async function saveEdits(id, caption, platform, link) {
+      if (pendingEdits[id]) pendingEdits[id] = { ...pendingEdits[id], caption, platform, link };
+      else pendingEdits[id] = { caption, platform, link };
+      await persistEdits();
     }
 
     // ── Form ──
